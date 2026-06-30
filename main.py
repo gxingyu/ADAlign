@@ -1,282 +1,174 @@
 import argparse
+import json
 import os
-import datetime
 import os.path as osp
+import random
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import torch
-from pygda.datasets import CitationDataset, AirportDataset, BlogDataset, MAGDataset, TwitchDataset
+from pygda.datasets import AirportDataset, BlogDataset, CitationDataset, MAGDataset, TwitchDataset
+from torch_geometric.data import Data
 from torch_geometric.utils import degree
-from pygda.models import UDAGCN, A2GNN, GRADE, TDSS
-from pygda.models import ASN, SpecReg, GNN
-from pygda.models import StruRW, ACDNE, DANE
-from pygda.models import AdaGCN, JHGDA, KBL
-from pygda.models import DGDA, SAGDA, CWGCN, DGSDA
-from pygda.models import DMGNN, PairAlign
-from pygda.metrics import eval_micro_f1, eval_macro_f1
+
+from configs import PAPER_DEFAULTS, resolve_domain_name
 from model.ncfm import NCFM
-from model.gaa import GAA
-from model.hgda import HGDA
 
-#  Citation/ACMv9 DBLPv7 Citationv1
-#  Airport/BRAZIL EUROPE USA
-#  Blog/Blog1 Blog2
-# Argument parser
-parser = argparse.ArgumentParser()
-parser.add_argument('--nhid', type=int, default=64, help='hidden size')
-parser.add_argument('--device', type=str, default='cuda:3', help='specify cuda devices')
-parser.add_argument('--source', type=str, default='ACMv9', help='source domain data, DBLPv7/ACMv9/Citationv1')
-parser.add_argument('--target', type=str, default='Citationv1', help='target domain data, DBLPv7/ACMv9/Citationv1')
-parser.add_argument('--num_layers', type=int, default=2, help='number of layers in NCFM')
-parser.add_argument('--dropout', type=float, default=0.25, help='dropout rate')
-parser.add_argument('--s_pnums', type=int, default=0, help='source pseudo numbers')
-parser.add_argument('--t_pnums', type=int, default=10, help='target pseudo numbers')
-parser.add_argument('--weight', type=float, default=0.5, help='loss weight')
-parser.add_argument('--weight_decay', type=float, default=0.001, help='weight decay for optimizer')
-parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
-parser.add_argument('--ncfm_epoch', type=int, default=200, help='number of epochs for NCFM')
-parser.add_argument('--t_batchsize', type=int, default=2048, help='target batch size')
-parser.add_argument('--alpha', type=float, default=0.2, help='alpha parameter for NCFM')
-parser.add_argument('--model_type', type=str, default='GAA', help='Specify the model type to use')
-args = parser.parse_args()
 
-# Load datasets
-if args.source in {'DBLPv7', 'ACMv9', 'Citationv1'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Citation', args.source)
-    source_dataset = CitationDataset(path, args.source)
-if args.target in {'DBLPv7', 'ACMv9', 'Citationv1'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Citation', args.target)
-    target_dataset = CitationDataset(path, args.target)
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-if args.source in {'BRAZIL', 'EUROPE', 'USA'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Airport', args.source)
-    source_dataset = AirportDataset(path, args.source)
 
-if args.target in {'BRAZIL', 'EUROPE', 'USA'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Airport', args.target)
-    target_dataset = AirportDataset(path, args.target)
+def build_dataset(domain: str, root: str):
+    domain = resolve_domain_name(domain)
+    if domain in {"DBLPv7", "ACMv9", "Citationv1"}:
+        path = osp.join(root, "data", "Citation", domain)
+        return CitationDataset(path, domain)
+    if domain in {"BRAZIL", "EUROPE", "USA"}:
+        path = osp.join(root, "data", "Airport", domain)
+        return AirportDataset(path, domain)
+    if domain in {"Blog1", "Blog2"}:
+        path = osp.join(root, "data", "Blog", domain)
+        return BlogDataset(path, domain)
+    if domain in {"MAG_CN", "MAG_DE", "MAG_FR", "MAG_JP", "MAG_RU", "MAG_US"}:
+        path = osp.join(root, "data", "MAG", domain)
+        return MAGDataset(path, domain)
+    if domain in {"DE", "EN", "ES", "FR", "PT", "RU"}:
+        path = osp.join(root, "data", "Twitch", domain)
+        return TwitchDataset(path, domain)
+    raise ValueError(f"Unsupported domain: {domain}")
 
-if args.source in {'Blog1', 'Blog2'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Blog', args.source)
-    source_dataset = BlogDataset(path, args.source)
 
-if args.target in {'Blog1', 'Blog2'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Blog', args.target)
-    target_dataset = BlogDataset(path, args.target)
+def ensure_features(data: Data, device: str, default_num_features: int = 241) -> Data:
+    if not hasattr(data, "x") or data.x is None:
+        node_degrees = degree(data.edge_index[0], num_nodes=data.num_nodes).long()
+        num_classes = max(default_num_features, int(node_degrees.max().item()) + 1)
+        data.x = torch.nn.functional.one_hot(node_degrees, num_classes=num_classes).float()
+    return data.to(device)
 
-if args.source in {'MAG_CN', 'MAG_DE', 'MAG_FR', 'MAG_JP', 'MAG_RU', 'MAG_US'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/MAG', args.source)
-    source_dataset = MAGDataset(path, args.source)
 
-if args.target in {'MAG_CN', 'MAG_DE', 'MAG_FR', 'MAG_JP', 'MAG_RU', 'MAG_US'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/MAG', args.target)
-    target_dataset = MAGDataset(path, args.target)
-
-if args.source in {'DE', 'EN', 'FR'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Twitch', args.source)
-    source_dataset = TwitchDataset(path, args.source)
-
-if args.target in {'DE', 'EN', 'FR'}:
-    path = osp.join(osp.dirname(osp.realpath(__file__)), '.', './data/Twitch', args.target)
-    target_dataset = TwitchDataset(path, args.target)
-
-source_data = source_dataset[0].to(args.device)
-target_data = target_dataset[0].to(args.device)
-default_num_features = 241
-
-# Check for x attribute, construct features if missing
-if not hasattr(source_data, 'x') or source_data.x is None:
-    node_degrees = degree(source_data.edge_index[0], num_nodes=source_data.num_nodes).long()
-    source_data.x = torch.nn.functional.one_hot(node_degrees, num_classes=default_num_features).float().to(args.device)
-
-if not hasattr(target_data, 'x') or target_data.x is None:
-    node_degrees = degree(target_data.edge_index[0], num_nodes=target_data.num_nodes).long()
-    target_data.x = torch.nn.functional.one_hot(node_degrees, num_classes=default_num_features).float().to(args.device)
-
-num_features = source_data.x.size(1)
-num_classes = len(np.unique(source_data.y.cpu().numpy()))
-
-# Initialize result lists
-micro_f1_scores = []
-macro_f1_scores = []
-
-# Train over multiple epochs
-for epoch in range(10):
-    # Select model based on model_type
-    if args.model_type == 'NCFM':
-        model = NCFM(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            s_pnums=args.s_pnums,
-            t_pnums=args.t_pnums,
-            weight=args.weight,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch,
-            t_batchsize=args.t_batchsize,
-            alpha=args.alpha,
+def load_transfer(source: str, target: str, device: str, synthetic: bool = False) -> Tuple[Data, Data]:
+    if synthetic:
+        edge_index = torch.tensor(
+            [[0, 1, 2, 3, 4, 5, 0, 2, 4, 6], [1, 2, 3, 4, 5, 6, 2, 4, 6, 0]],
+            dtype=torch.long,
         )
-    elif args.model_type == 'TDSS':
-        model = TDSS(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            s_pnums=args.s_pnums,
-            t_pnums=args.t_pnums,
-            weight=args.weight,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch
+        source_data = Data(
+            x=torch.randn(8, 5),
+            edge_index=edge_index,
+            y=torch.tensor([0, 1, 0, 1, 0, 1, 0, 1], dtype=torch.long),
         )
-    elif args.model_type == 'HGDA':
-        model = HGDA(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            s_pnums=args.s_pnums,
-            t_pnums=args.t_pnums,
-            weight=args.weight,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch,
+        target_data = Data(
+            x=torch.randn(8, 5),
+            edge_index=edge_index,
+            y=torch.tensor([0, 1, 1, 0, 0, 1, 1, 0], dtype=torch.long),
         )
-    elif args.model_type == 'GAA':
-        model = GAA(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            s_pnums=args.s_pnums,
-            t_pnums=args.t_pnums,
-            weight=args.weight,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch,
-        )
-    elif args.model_type == 'DGSDA':
-        model = DGSDA(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch,
-        )
-    elif args.model_type == 'GNN':
-        model = GNN(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device, gnn='gcn')
-    elif args.model_type == 'A2GNN':
-        model = A2GNN(
-            in_dim=num_features,
-            hid_dim=args.nhid,
-            num_classes=num_classes,
-            device=args.device,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            s_pnums=args.s_pnums,
-            t_pnums=args.t_pnums,
-            weight=args.weight,
-            weight_decay=args.weight_decay,
-            lr=args.lr,
-            epoch=args.ncfm_epoch,
-        )
-    elif args.model_type == 'UDAGCN':
-        model = UDAGCN(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'GRADE':
-        model = GRADE(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'ASN':
-        model = ASN(in_dim=num_features, hid_dim=args.nhid, hid_dim_vae=args.nhid, num_classes=num_classes,
-                    device=args.device)
-    elif args.model_type == 'SpecReg':
-        model = SpecReg(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device,
-                        reg_mode=True)
-    elif args.model_type == 'StruRW':
-        model = StruRW(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'ACDNE':
-        model = ACDNE(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'DANE':
-        model = DANE(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device,
-                     num_layers=args.num_layers)
-    elif args.model_type == 'AdaGCN':
-        model = AdaGCN(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'JHGDA':
-        model = JHGDA(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'KBL':
-        model = KBL(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'DGDA':
-        model = DGDA(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'SAGDA':
-        model = SAGDA(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'CWGCN':
-        model = CWGCN(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'DMGNN':
-        model = DMGNN(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
-    elif args.model_type == 'PairAlign':
-        model = PairAlign(in_dim=num_features, hid_dim=args.nhid, num_classes=num_classes, device=args.device)
+        return source_data.to(device), target_data.to(device)
 
-    # Train the model
-    max_mi, max_ma = model.fit(source_data, target_data)
-    print('max_mi:', max_mi)
-    print('max_ma:', max_ma)
-    micro_f1_scores.append(max_mi)
-    macro_f1_scores.append(max_ma)
-
-# Compute mean and std
-micro_f1_mean = np.mean(micro_f1_scores)
-micro_f1_std = np.std(micro_f1_scores)
-macro_f1_mean = np.mean(macro_f1_scores)
-macro_f1_std = np.std(macro_f1_scores)
-print(micro_f1_scores)
-print(f'Mean micro-f1: {micro_f1_mean * 100:.2f} ± {micro_f1_std * 100:.2f}')
-print(f'Mean macro-f1: {macro_f1_mean * 100:.2f} ± {macro_f1_std * 100:.2f}')
-
-# 定义一个清理函数
-import glob
+    root = osp.dirname(osp.realpath(__file__))
+    source_dataset = build_dataset(source, root)
+    target_dataset = build_dataset(target, root)
+    source_data = ensure_features(source_dataset[0], device)
+    target_data = ensure_features(target_dataset[0], device)
+    return source_data, target_data
 
 
-def cleanup_logs(results_dir, prefix, keep_num=10):
-    # 获取所有该迁移场景的 log 文件
-    pattern = os.path.join(results_dir, f"{prefix}_*.log")
-    files = glob.glob(pattern)
+def build_model(args: argparse.Namespace, source_data: Data) -> NCFM:
+    num_features = source_data.x.size(1)
+    num_classes = len(np.unique(source_data.y.detach().cpu().numpy()))
+    return NCFM(
+        in_dim=num_features,
+        hid_dim=args.nhid,
+        num_classes=num_classes,
+        device=args.device,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        s_pnums=args.s_pnums,
+        t_pnums=args.t_pnums,
+        weight=args.weight,
+        weight_decay=args.weight_decay,
+        lr=args.lr,
+        epoch=args.epochs,
+        t_batchsize=args.t_batchsize,
+        alpha=args.alpha,
+        verbose=args.verbose,
+    )
 
-    # 提取 micro-f1 得分
-    def extract_score(fname):
-        try:
-            return float(fname.split('_')[-1][:-4])  # 取最后的数字部分
-        except:
-            return -float('inf')
 
-    files_sorted = sorted(files, key=extract_score, reverse=True)
-    # 需要保留的文件
-    keep_files = set(files_sorted[:keep_num])
-    # 删除多余的
-    for f in files_sorted[keep_num:]:
-        os.remove(f)
+def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
+    micro_f1_scores: List[float] = []
+    macro_f1_scores: List[float] = []
+
+    for run_idx in range(args.runs):
+        seed = args.seed + run_idx
+        set_seed(seed)
+        source_data, target_data = load_transfer(args.source, args.target, args.device, args.synthetic)
+        model = build_model(args, source_data)
+        max_mi, max_ma = model.fit(source_data, target_data)
+        micro_f1_scores.append(float(max_mi))
+        macro_f1_scores.append(float(max_ma))
+        print(f"run={run_idx} seed={seed} max_micro_f1={max_mi:.6f} max_macro_f1={max_ma:.6f}")
+
+    result = {
+        "source": resolve_domain_name(args.source),
+        "target": resolve_domain_name(args.target),
+        "runs": args.runs,
+        "params": {
+            "nhid": args.nhid,
+            "num_layers": args.num_layers,
+            "dropout": args.dropout,
+            "s_pnums": args.s_pnums,
+            "t_pnums": args.t_pnums,
+            "weight": args.weight,
+            "weight_decay": args.weight_decay,
+            "lr": args.lr,
+            "epochs": args.epochs,
+            "t_batchsize": args.t_batchsize,
+            "alpha": args.alpha,
+        },
+        "micro_f1_scores": micro_f1_scores,
+        "macro_f1_scores": macro_f1_scores,
+        "micro_f1_mean": float(np.mean(micro_f1_scores)),
+        "micro_f1_std": float(np.std(micro_f1_scores)),
+        "macro_f1_mean": float(np.mean(macro_f1_scores)),
+        "macro_f1_std": float(np.std(macro_f1_scores)),
+    }
+
+    print(json.dumps(result, indent=2))
+    if args.results_json:
+        os.makedirs(osp.dirname(osp.abspath(args.results_json)), exist_ok=True)
+        with open(args.results_json, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2)
+    return result
 
 
-logfile_name = f"results_t_blogUBE/{args.model_type}_{args.source}_{args.target}_{args.t_batchsize}.log"
-with open(logfile_name, 'w') as f:
-    f.write("Args:\n")
-    for k, v in vars(args).items():
-        f.write(f"{k}: {v}\n")
-    f.write("\n")
-    f.write("Results:\n")
-    f.write(f"micro_f1_scores: {micro_f1_scores}\n")
-    f.write(f"macro_f1_scores: {macro_f1_scores}\n")
-    f.write(f"Mean micro-f1: {micro_f1_mean * 100:.2f} ± {micro_f1_std * 100:.2f}\n")
-    f.write(f"Mean macro-f1: {macro_f1_mean * 100:.2f} ± {macro_f1_std * 100:.2f}\n")
-# cleanup_logs('results', f"ncfm_{args.source}_{args.target}", keep_num=10)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run ADAlign / NCFM graph domain adaptation.")
+    parser.add_argument("--source", type=str, default="ACMv9", help="source domain")
+    parser.add_argument("--target", type=str, default="Citationv1", help="target domain")
+    parser.add_argument("--device", type=str, default="cuda:0", help="cpu or cuda device")
+    parser.add_argument("--runs", type=int, default=5, help="number of repeated runs")
+    parser.add_argument("--seed", type=int, default=42, help="base random seed")
+    parser.add_argument("--nhid", type=int, default=PAPER_DEFAULTS["nhid"], help="hidden feature dimension")
+    parser.add_argument("--num_layers", type=int, default=PAPER_DEFAULTS["num_layers"])
+    parser.add_argument("--dropout", type=float, default=PAPER_DEFAULTS["dropout"])
+    parser.add_argument("--s_pnums", type=int, default=PAPER_DEFAULTS["s_pnums"])
+    parser.add_argument("--t_pnums", type=int, default=PAPER_DEFAULTS["t_pnums"])
+    parser.add_argument("--weight", type=float, default=PAPER_DEFAULTS["weight"], help="alignment loss weight lambda")
+    parser.add_argument("--weight_decay", type=float, default=PAPER_DEFAULTS["weight_decay"])
+    parser.add_argument("--lr", type=float, default=PAPER_DEFAULTS["lr"])
+    parser.add_argument("--epochs", type=int, default=PAPER_DEFAULTS["epochs"])
+    parser.add_argument("--t_batchsize", type=int, default=PAPER_DEFAULTS["t_batchsize"], help="frequency number M")
+    parser.add_argument("--alpha", type=float, default=PAPER_DEFAULTS["alpha"], help="amplitude weight kappa")
+    parser.add_argument("--verbose", type=int, default=2)
+    parser.add_argument("--results-json", type=str, default=None)
+    parser.add_argument("--synthetic", action="store_true", help="run a tiny synthetic smoke test instead of loading datasets")
+    return parser.parse_args()
 
+
+if __name__ == "__main__":
+    run_experiment(parse_args())

@@ -1,0 +1,71 @@
+{
+  "description": "Reference ADAlign hyperparameters selected from Table 7 search runs. Scores are single-run Micro-F1 selection scores unless a validation file is provided separately.",
+  "metric": "micro_f1_mean",
+  "value_scale": "fraction",
+  "transfers": {
+    "ACMv9->Citationv1": {
+      "score": 0.834023503077784,
+      "params": {"lr": 0.01, "weight_decay": 0.005, "t_batchsize": 2048, "s_pnums": 10, "t_pnums": 10, "weight": 0.6, "dropout": 0.25, "nhid": 128, "alpha": 1.0, "epochs": 150, "num_layers": 2}
+    },
+    "ACMv9->DBLPv7": {
+      "score": 0.7848285922684172,
+      "params": {"lr": 0.01, "weight_decay": 0.005, "t_batchsize": 4096, "s_pnums": 10, "t_pnums": 10, "weight": 1.0, "dropout": 0.1, "nhid": 128, "alpha": 1.0, "epochs": 150, "num_layers": 2}
+    },
+    "Citationv1->ACMv9": {
+      "score": 0.763034188034188,
+      "params": {"lr": 0.005, "weight_decay": 0.001, "t_batchsize": 128, "s_pnums": 15, "t_pnums": 15, "weight": 0.6, "dropout": 0.5, "nhid": 128, "alpha": 0.8, "epochs": 150, "num_layers": 2}
+    },
+    "Citationv1->DBLPv7": {
+      "score": 0.799598832968636,
+      "params": {"lr": 0.01, "weight_decay": 0.001, "t_batchsize": 2048, "s_pnums": 15, "t_pnums": 15, "weight": 0.0, "dropout": 0.25, "nhid": 128, "alpha": 0.0, "epochs": 150, "num_layers": 2}
+    },
+    "DBLPv7->ACMv9": {
+      "score": 0.742948717948718,
+      "params": {"lr": 0.01, "weight_decay": 0.005, "t_batchsize": 2048, "s_pnums": 15, "t_pnums": 15, "weight": 0.4, "dropout": 0.25, "nhid": 128, "alpha": 0.4, "epochs": 150, "num_layers": 2}
+    },
+    "DBLPv7->Citationv1": {
+      "score": 0.821600447677672,
+      "params": {"lr": 0.005, "weight_decay": 0.005, "t_batchsize": 128, "s_pnums": 10, "t_pnums": 10, "weight": 0.6, "dropout": 0.1, "nhid": 128, "alpha": 0.8, "epochs": 150, "num_layers": 2}
+    },
+    "Blog1->Blog2": {
+      "score": 0.505524861878453,
+      "params": {"lr": 0.001, "weight_decay": 0.001, "t_batchsize": 128, "s_pnums": 1, "t_pnums": 1, "weight": 0.4, "dropout": 0.1, "nhid": 128, "alpha": 0.6, "epochs": 150, "num_layers": 2}
+    },
+    "Blog2->Blog1": {
+      "score": 0.5126086956521739,
+      "params": {"lr": 0.001, "weight_decay": 0.001, "t_batchsize": 128, "s_pnums": 1, "t_pnums": 1, "weight": 0.0, "dropout": 0.1, "nhid": 128, "alpha": 0.4, "epochs": 150, "num_layers": 2}
+    },
+    "USA->BRAZIL": {
+      "score": 0.7938931297709924,
+      "params": {"lr": 0.01, "weight_decay": 0.01, "t_batchsize": 128, "s_pnums": 10, "t_pnums": 10, "weight": 1.0, "dropout": 0.1, "nhid": 128, "alpha": 0.4, "epochs": 150, "num_layers": 2}
+    },
+    "USA->EUROPE": {
+      "score": 0.5639097744360902,
+      "params": {"lr": 0.005, "weight_decay": 0.01, "t_batchsize": 1024, "s_pnums": 0, "t_pnums": 0, "weight": 1.0, "dropout": 0.5, "nhid": 128, "alpha": 0.4, "epochs": 150, "num_layers": 2}
+    },
+    "BRAZIL->USA": {
+      "score": 0.5470588235294118,
+      "params": {"lr": 0.001, "weight_decay": 0.005, "t_batchsize": 64, "s_pnums": 10, "t_pnums": 10, "weight": 0.4, "dropout": 0.25, "nhid": 128, "alpha": 0.0, "epochs": 150, "num_layers": 2}
+    },
+    "BRAZIL->EUROPE": {
+      "score": 0.5714285714285714,
+      "params": {"lr": 0.01, "weight_decay": 0.01, "t_batchsize": 4096, "s_pnums": 0, "t_pnums": 0, "weight": 0.2, "dropout": 0.5, "nhid": 128, "alpha": 1.0, "epochs": 150, "num_layers": 2}
+    },
+    "EUROPE->USA": {
+      "score": 0.526890756302521,
+      "params": {"lr": 0.01, "weight_decay": 0.01, "t_batchsize": 128, "s_pnums": 15, "t_pnums": 15, "weight": 1.0, "dropout": 0.5, "nhid": 128, "alpha": 0.4, "epochs": 150, "num_layers": 2}
+    },
+    "EUROPE->BRAZIL": {
+      "score": 0.7480916030534351,
+      "params": {"lr": 0.01, "weight_decay": 0.005, "t_batchsize": 1024, "s_pnums": 15, "t_pnums": 15, "weight": 0.6, "dropout": 0.5, "nhid": 128, "alpha": 0.0, "epochs": 150, "num_layers": 2}
+    },
+    "DE->EN": {
+      "score": 0.6042660679202919,
+      "params": {"lr": 0.01, "weight_decay": 0.001, "t_batchsize": 4096, "s_pnums": 0, "t_pnums": 0, "weight": 0.8, "dropout": 0.1, "nhid": 128, "alpha": 0.6, "epochs": 150, "num_layers": 2}
+    },
+    "EN->DE": {
+      "score": 0.6572962728995578,
+      "params": {"lr": 0.005, "weight_decay": 0.005, "t_batchsize": 32, "s_pnums": 0, "t_pnums": 0, "weight": 1.0, "dropout": 0.5, "nhid": 128, "alpha": 0.2, "epochs": 150, "num_layers": 2}
+    }
+  }
+}
